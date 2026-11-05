@@ -7,7 +7,7 @@ import ast
 # Only allow access to files inside this project.
 PROJECT_DIR = Path(__file__).resolve().parent
 
-TASK_FILE = PROJECT_DIR / "task.md"
+TASK_FILE = PROJECT_DIR / "testing" / "task.md"
 SOLUTION_FILE = PROJECT_DIR / "solution.py"
 
 
