@@ -51,8 +51,8 @@ def run_tests():
     Run the environment verifier and return its output.
     """
 
-    import solution
-    import environment
+    import solution as solution
+    import testing.environment as environment
 
     # Reload the solution so recent edits are picked up.
     importlib.reload(solution)
