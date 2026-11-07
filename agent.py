@@ -1,83 +1,52 @@
 """
 BugLab agent loop.
 
-Runs a tool-using model against the BugLab environment and records
-every step to runs/ so trajectories can be analyzed later.
+Runs a tool-using model on one task inside one workspace and returns
+a trajectory: every tool call, its result, and why the episode ended.
 
 Uses Gemini through its OpenAI-compatible Chat Completions endpoint
 (the Responses API is not supported there).
 
+The episode ends when the agent replies without calling a tool
+("submits"), or when it runs out of steps. It does NOT end just
+because the visible tests pass: whether the agent stops too early
+is one of the things we measure.
+
 Usage:
-    python agent.py                 # run the agent once
-    python agent.py --list-models   # show models your key can use
+    python agent.py --task average     # one trial (same as run_trials.py --n 1)
+    python agent.py --list-models      # models your key can use
 """
 
+import argparse
 import json
 import os
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
 
+import openai
 from dotenv import load_dotenv
-from openai import OpenAI
 
-from agent_tools import AGENT_TOOLS
+from agent_tools import TOOL_SCHEMAS, make_tools
 
 load_dotenv()
 
-client = OpenAI(
-    api_key=os.environ.get("GEMINI_API_KEY"),
+client = openai.OpenAI(
+    # Placeholder lets this module import without a key (e.g. for tests);
+    # the CLI entry points check for a real key before calling the API.
+    api_key=os.environ.get("GEMINI_API_KEY") or "not-set",
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
 )
 
-MODEL = os.environ.get("BUGLAB_MODEL", "gemini-3-flash-preview")
-MAX_STEPS = int(os.environ.get("BUGLAB_MAX_STEPS", "10"))
-RUNS_DIR = Path(__file__).resolve().parent / "runs"
+DEFAULT_MODEL = os.environ.get("BUGLAB_MODEL", "gemini-3-flash-preview")
+DEFAULT_MAX_STEPS = int(os.environ.get("BUGLAB_MAX_STEPS", "15"))
 
-
-# Tools the model is allowed to use (Chat Completions format).
-# No-argument tools omit "parameters", which means an empty argument list.
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "read_task",
-            "description": "Read the task instructions.",
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_solution",
-            "description": "Read the current solution.py code.",
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_solution",
-            "description": "Replace solution.py with new Python code.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "new_code": {
-                        "type": "string",
-                        "description": "The complete new Python source code.",
-                    }
-                },
-                "required": ["new_code"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_tests",
-            "description": "Run the verifier and observe the reward.",
-        },
-    },
-]
+RETRYABLE_ERRORS = (
+    openai.RateLimitError,
+    openai.InternalServerError,
+    openai.APIConnectionError,
+    openai.APITimeoutError,
+)
 
 
 INSTRUCTIONS = """
@@ -100,75 +69,98 @@ If tests fail, inspect the feedback and try again.
 Only modify solution.py.
 Do not attempt to modify the verifier.
 
-Stop when the reward reaches 1.0 or you have
-exhausted your available steps.
+You can make at most {max_steps} tool calls.
+When you are confident your solution meets every requirement in the
+task, reply with a short summary and no tool call. That ends the task.
 """
 
 
-def call_model(messages):
-    """Ask the model for its next move, retrying on rate limits."""
+def call_model(model, messages):
+    """Ask the model for its next move, retrying on transient errors."""
     for attempt in range(5):
         try:
             return client.chat.completions.create(
-                model=MODEL,
+                model=model,
                 messages=messages,
-                tools=TOOLS,
+                tools=TOOL_SCHEMAS,
             )
-        except Exception as error:
+        except RETRYABLE_ERRORS as error:
+            if attempt == 4:
+                raise
             # Free tiers rate-limit aggressively; back off and retry.
-            if "429" in str(error) and attempt < 4:
-                wait = 2 ** attempt * 5
-                print(f"\n(rate limited, retrying in {wait}s)")
-                time.sleep(wait)
-                continue
-            raise
+            wait = 5 * 2 ** attempt
+            print(f"\n({type(error).__name__}, retrying in {wait}s)")
+            time.sleep(wait)
 
 
-def execute_tool(name, raw_arguments):
+def execute_tool(tools, name, raw_arguments):
     """Run one tool call and return (arguments, result)."""
     try:
         arguments = json.loads(raw_arguments or "{}")
     except json.JSONDecodeError as error:
         return {}, {"error": f"Invalid JSON arguments: {error}"}
 
-    if name not in AGENT_TOOLS:
+    if name not in tools:
         return arguments, {"error": f"Unknown tool: {name}"}
 
     try:
-        return arguments, AGENT_TOOLS[name](**arguments)
+        return arguments, tools[name](**arguments)
     except Exception as error:
         return arguments, {"error": f"{type(error).__name__}: {error}"}
 
 
-def save_trajectory(trajectory):
-    RUNS_DIR.mkdir(exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = RUNS_DIR / f"run-{stamp}.json"
-    path.write_text(json.dumps(trajectory, indent=2), encoding="utf-8")
-    print(f"Trajectory saved to {path}")
+def run_agent(
+    task_name,
+    workspace,
+    model=DEFAULT_MODEL,
+    max_steps=DEFAULT_MAX_STEPS,
+    stop_on_pass=False,
+    verbose=True,
+):
+    tools = make_tools(task_name, workspace)
 
+    def log(text):
+        if verbose:
+            print(text)
 
-def run_agent():
     messages = [
-        {"role": "system", "content": INSTRUCTIONS},
+        {"role": "system", "content": INSTRUCTIONS.format(max_steps=max_steps)},
         {"role": "user", "content": "Start by reading the task and solving it."},
     ]
 
     trajectory = {
-        "model": MODEL,
-        "max_steps": MAX_STEPS,
+        "task": task_name,
+        "model": model,
+        "max_steps": max_steps,
         "started_at": datetime.now().isoformat(),
         "steps": [],
-        "final_reward": None,
-        "solved": False,
+        "final_message": None,
+        "last_seen_reward": None,
         "stop_reason": None,
+        "error": None,
+        "model_calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
     }
+    started = time.time()
 
     steps = 0
     stop_reason = None
 
     while stop_reason is None:
-        response = call_model(messages)
+        try:
+            response = call_model(model, messages)
+        except Exception as error:
+            trajectory["error"] = f"{type(error).__name__}: {error}"
+            stop_reason = "api_error"
+            log(f"\nAPI error: {trajectory['error']}")
+            break
+
+        trajectory["model_calls"] += 1
+        if response.usage:
+            trajectory["prompt_tokens"] += response.usage.prompt_tokens or 0
+            trajectory["completion_tokens"] += response.usage.completion_tokens or 0
+
         message = response.choices[0].message
 
         # Keep the assistant turn in history exactly as returned.
@@ -177,27 +169,29 @@ def run_agent():
         messages.append(message.model_dump(exclude_none=True))
 
         if message.content:
-            print("\nAGENT:")
-            print(message.content)
+            log(f"\nAGENT:\n{message.content}")
 
         if not message.tool_calls:
-            stop_reason = "agent_stopped"
+            trajectory["final_message"] = message.content
+            stop_reason = "submitted"
             break
 
         for call in message.tool_calls:
             steps += 1
             name = call.function.name
-            arguments, result = execute_tool(name, call.function.arguments)
+            arguments, result = execute_tool(tools, name, call.function.arguments)
 
-            print(f"\nTOOL CALL {steps}: {name}")
-            print(f"Arguments: {arguments}")
+            log(f"\nTOOL CALL {steps}: {name}")
+            if name == "edit_solution" and "new_code" in arguments:
+                log(arguments["new_code"])
+            elif arguments:
+                log(f"Arguments: {arguments}")
 
-            # Check the reward BEFORE converting the result to text.
             reward = None
             if name == "run_tests" and isinstance(result, dict):
                 reward = result.get("reward")
-                trajectory["final_reward"] = reward
-                print(f"Reward: {reward}")
+                trajectory["last_seen_reward"] = reward
+                log(f"Visible reward: {reward}")
 
             trajectory["steps"].append({
                 "step": steps,
@@ -214,22 +208,17 @@ def run_agent():
                 "content": result if isinstance(result, str) else json.dumps(result),
             })
 
-            if reward == 1.0:
-                print("\nTask completed!")
-                trajectory["solved"] = True
-                stop_reason = "solved"
+            if stop_on_pass and reward == 1.0:
+                stop_reason = "visible_pass"
                 break
-
-            if steps >= MAX_STEPS:
+            if steps >= max_steps:
                 stop_reason = "max_steps"
                 break
 
     trajectory["stop_reason"] = stop_reason
     trajectory["total_tool_calls"] = steps
-
-    print(f"\nStopped: {stop_reason}")
-    print(f"Total tool calls: {steps}")
-    save_trajectory(trajectory)
+    trajectory["duration_seconds"] = round(time.time() - started, 1)
+    log(f"\nStopped: {stop_reason} after {steps} tool calls")
     return trajectory
 
 
@@ -242,7 +231,14 @@ if __name__ == "__main__":
     if not os.environ.get("GEMINI_API_KEY"):
         sys.exit("GEMINI_API_KEY is not set. Add it to your .env file.")
 
-    if "--list-models" in sys.argv:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--task", default="average")
+    parser.add_argument("--list-models", action="store_true")
+    args = parser.parse_args()
+
+    if args.list_models:
         list_models()
     else:
-        run_agent()
+        from run_trials import run_batch
+
+        run_batch(args.task, n=1)

@@ -13,7 +13,8 @@ non-empty list of numbers.
 - Do not change the function name or its arguments.
 
 ## Completion
-Your solution will be evaluated against multiple test cases.
-Your goal is to pass all tests.
+`run_tests` runs some of the tests used for grading. Your
+solution will also be graded against additional tests that
+you cannot run.
 
 Only modify solution.py.

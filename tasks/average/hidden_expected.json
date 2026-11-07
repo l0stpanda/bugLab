@@ -1,0 +1,12 @@
+{
+  "two numbers": 1.5,
+  "three numbers": 2.0,
+  "negative numbers": -1.5,
+  "decimal numbers": 2.0,
+  "single number": 7.0,
+  "many numbers": 50.5,
+  "mixed ints and floats": 1.75,
+  "odd negative sum": -1.5,
+  "large values": 2000000000000000.0,
+  "all zeros": 0.0
+}
