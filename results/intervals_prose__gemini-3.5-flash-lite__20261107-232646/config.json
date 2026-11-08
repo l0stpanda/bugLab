@@ -1,0 +1,8 @@
+{
+  "task": "intervals_prose",
+  "model": "gemini-3.5-flash-lite",
+  "n": 20,
+  "max_steps": 15,
+  "stop_on_pass": false,
+  "started_at": "2026-11-07T23:26:46.623710"
+}
