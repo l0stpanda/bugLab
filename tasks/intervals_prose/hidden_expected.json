@@ -1,0 +1,87 @@
+{
+  "overlapping": [
+    [
+      1,
+      6
+    ],
+    [
+      8,
+      10
+    ]
+  ],
+  "unsorted input": [
+    [
+      1,
+      6
+    ],
+    [
+      8,
+      10
+    ]
+  ],
+  "nested interval": [
+    [
+      1,
+      10
+    ]
+  ],
+  "touching intervals": [
+    [
+      1,
+      5
+    ]
+  ],
+  "no intervals": [],
+  "chain of touches": [
+    [
+      1,
+      4
+    ]
+  ],
+  "duplicates": [
+    [
+      1,
+      4
+    ]
+  ],
+  "negative and float bounds": [
+    [
+      -5,
+      0
+    ],
+    [
+      0.5,
+      1
+    ]
+  ],
+  "drops empty intervals": [
+    [
+      1,
+      2
+    ],
+    [
+      7,
+      8
+    ]
+  ],
+  "only empty intervals": [],
+  "rejects start > end": {
+    "raises": "ValueError"
+  },
+  "does not modify input": true,
+  "accepts a generator": [
+    [
+      1,
+      2
+    ],
+    [
+      4,
+      8
+    ]
+  ],
+  "returns a list of tuples": [
+    "list",
+    "tuple",
+    "tuple"
+  ]
+}

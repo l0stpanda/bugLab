@@ -84,9 +84,12 @@ def run_batch(task_name, n, model=None, max_steps=None, delay=0,
         print(f"\n{'=' * 20} Trial {i}/{n} {'=' * 20}")
         t = run_trial(task_name, batch_dir / f"trial-{i:02d}",
                       model, max_steps, stop_on_pass, verbose)
-        print(f"\nTrial {i}: {t['stop_reason']}, {t['total_tool_calls']} tool calls, "
-              f"visible {t['final_visible_reward']:.2f}, "
-              f"hidden {t['final_hidden_reward']:.2f}")
+        if t["stop_reason"] == "api_error":
+            scores = "not scored (API error)"
+        else:
+            scores = (f"visible {t['final_visible_reward']:.2f}, "
+                      f"hidden {t['final_hidden_reward']:.2f}")
+        print(f"\nTrial {i}: {t['stop_reason']}, {t['total_tool_calls']} tool calls, {scores}")
         if i < n and delay:
             time.sleep(delay)
 
