@@ -79,6 +79,12 @@ docker run --rm --env-file .env -v "${PWD}/runs:/app/runs" buglab run_trials.py 
 # analyze on the host as usual: .venv/bin/python analyze.py
 ```
 
+Shortcut (Mac, or Git Bash/WSL on Windows; not PowerShell):
+`./run_in_docker.sh run_trials.py --task median_conflict --n 20 --quiet --model gemini-3.5-flash-lite`.
+It rebuilds the image automatically, then adds hardening on top of the
+command above: `--read-only` filesystem (only `runs/` and `/tmp`
+writable), `--cap-drop ALL`, no-new-privileges, and memory/pid limits.
+
 `--env-file` takes `KEY=value` lines with no quotes around the value.
 What the container does and doesn't protect:
 - Protects: harness code, tests, `hidden_expected.json` (root-owned,
