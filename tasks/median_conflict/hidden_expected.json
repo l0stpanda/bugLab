@@ -1,0 +1,13 @@
+{
+  "odd length, unsorted": 2,
+  "even length, two items": 1.5,
+  "even length, four items": 2.5,
+  "even length, unsorted": 6.0,
+  "even length, six items": 3.5,
+  "single item": 5,
+  "negative and float values": -1.5,
+  "empty list raises ValueError": {
+    "raises": "ValueError"
+  },
+  "does not modify input": true
+}

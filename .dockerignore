@@ -1,0 +1,12 @@
+# Never bake secrets into the image: pass them with --env-file at run time.
+.env
+.env.*
+
+.git
+.venv
+venv
+runs
+__pycache__
+**/__pycache__
+*.py[cod]
+.vscode
